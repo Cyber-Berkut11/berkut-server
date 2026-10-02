@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -13,12 +14,10 @@ from aiogram.types import (
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import requests
 import uvicorn
 
-# Токен вашого бота та посилання на гру вже вписані
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8713286143:AAGuB62_ZqOAXMBSmc_J209ieVn_Ef5KDo4")
-WEB_APP_URL = os.getenv("WEB_APP_URL", "https://incredible-wisp-8ab39d.netlify.app")
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://berkutcyber.netlify.app")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -49,6 +48,7 @@ def health_check():
 
 @app.post("/api/create-stars-invoice")
 async def create_stars_invoice(req: InvoiceCreateRequest):
+    logging.info(f"Received invoice request for: {req.title}, amount: {req.stars_amount}")
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/createInvoiceLink"
     payload_data = {
         "title": req.title,
@@ -58,13 +58,23 @@ async def create_stars_invoice(req: InvoiceCreateRequest):
         "prices": [{"label": req.title, "amount": int(req.stars_amount)}],
     }
 
-    resp = requests.post(url, json=payload_data).json()
-    if not resp.get("ok"):
-        raise HTTPException(
-            status_code=400, detail=resp.get("description", "Invoice error")
-        )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload_data) as response:
+                resp = await response.json()
+                logging.info(f"Telegram response: {resp}")
+                
+                if not resp.get("ok"):
+                    logging.error(f"Telegram API error: {resp}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=resp.get("description", "Invoice error")
+                    )
 
-    return {"invoice_link": resp["result"]}
+                return {"invoice_link": resp["result"]}
+    except Exception as e:
+        logging.error(f"Server error generating invoice: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @dp.message(CommandStart())
